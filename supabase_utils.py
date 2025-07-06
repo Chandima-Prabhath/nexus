@@ -54,16 +54,15 @@ def get_all_files(search_term: Optional[str] = None) -> List[Dict[str, Any]]:
 
         response = query.execute()
 
-        # According to supabase-py v1.x, response is directly the APIResponse object.
-        # APIResponse has .data and .error attributes.
-        # Pylance might struggle if the exact type of APIResponse isn't fully resolved.
-        # We trust the runtime behavior here.
-        if hasattr(response, 'error') and response.error:
-            logger.error(f"Error fetching files from Supabase: {response.error}")
+        err = getattr(response, 'error', None)
+        data = getattr(response, 'data', None)
+
+        if err:
+            logger.error(f"Error fetching files from Supabase: {err}")
             return []
-        if hasattr(response, 'data'):
-            return response.data
-        return [] # Should not be reached if response structure is as expected
+        if data is not None: # Ensure data is not None before returning, even if empty list
+            return data
+        return []
     except Exception as e:
         logger.error(f"Exception fetching files from Supabase: {e}")
         return []
@@ -75,10 +74,10 @@ def delete_file_by_id(db_id: int) -> bool:
         return False
     try:
         response = supabase.table(TABLE_NAME).delete().eq("id", db_id).execute()
-        if hasattr(response, 'error') and response.error:
-            logger.error(f"Error deleting file with id {db_id} from Supabase: {response.error}")
+        err = getattr(response, 'error', None)
+        if err:
+            logger.error(f"Error deleting file with id {db_id} from Supabase: {err}")
             return False
-        # If no error, assume success. The response.data for delete contains the deleted items.
         return True
     except Exception as e:
         logger.error(f"Exception deleting file with id {db_id} from Supabase: {e}")
@@ -99,17 +98,19 @@ def add_file_record(file_id: str, unique_token: str, original_filename: Optional
         }
         response = supabase.table(TABLE_NAME).insert(data_to_insert).execute()
 
-        if hasattr(response, 'error') and response.error:
-            logger.error(f"Error adding file record to Supabase: {response.error}")
-            # Attempt to access error code if available
-            error_code = getattr(response.error, 'code', None)
-            if error_code == "23505": # Standard PostgreSQL unique violation code
+        err = getattr(response, 'error', None)
+        data = getattr(response, 'data', None)
+
+        if err:
+            logger.error(f"Error adding file record to Supabase: {err}")
+            error_code = getattr(err, 'code', None)
+            if error_code == "23505":
                  logger.warning(f"Unique constraint violation for file_id '{file_id}' or token '{unique_token}'.")
             return None
-        if hasattr(response, 'data') and response.data:
-            logger.info(f"File record added to Supabase: {response.data[0]}")
-            return response.data[0]
-        return None # No data and no error
+        if data: # Check if data is not None and not empty
+            logger.info(f"File record added to Supabase: {data[0]}")
+            return data[0]
+        return None
     except Exception as e:
         logger.error(f"Exception adding file record to Supabase: {e}")
         return None
@@ -121,14 +122,14 @@ def get_file_by_token(token: str) -> Optional[Dict[str, Any]]:
         return None
     try:
         response = supabase.table(TABLE_NAME).select("*").eq("unique_token", token).maybe_single().execute()
-        # maybe_single() itself might return None if no record, or an APIResponse
-        # If it's an APIResponse, then check .data and .error
-        if hasattr(response, 'error') and response.error: # Check for error attribute first
-            logger.error(f"Error fetching file by token '{token}' from Supabase: {response.error}")
+
+        err = getattr(response, 'error', None)
+        data = getattr(response, 'data', None) # data will be None if no record, or the record dict
+
+        if err:
+            logger.error(f"Error fetching file by token '{token}' from Supabase: {err}")
             return None
-        if hasattr(response, 'data'): # If no error, check for data
-            return response.data # This will be None if no record found by maybe_single, or the dict
-        return None # Fallback if response structure is unexpected
+        return data # This correctly returns None if no record, or the dict if found
     except Exception as e:
         logger.error(f"Exception fetching file by token '{token}' from Supabase: {e}")
         return None
@@ -140,12 +141,14 @@ def get_file_by_telegram_id(file_id: str) -> Optional[Dict[str, Any]]:
         return None
     try:
         response = supabase.table(TABLE_NAME).select("id, unique_token").eq("file_id", file_id).maybe_single().execute()
-        if hasattr(response, 'error') and response.error:
-            logger.error(f"Error fetching file by Telegram ID '{file_id}' from Supabase: {response.error}")
+
+        err = getattr(response, 'error', None)
+        data = getattr(response, 'data', None)
+
+        if err:
+            logger.error(f"Error fetching file by Telegram ID '{file_id}' from Supabase: {err}")
             return None
-        if hasattr(response, 'data'):
-            return response.data
-        return None
+        return data
     except Exception as e:
         logger.error(f"Exception fetching file by Telegram ID '{file_id}' from Supabase: {e}")
         return None
