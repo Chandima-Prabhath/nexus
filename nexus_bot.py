@@ -1,17 +1,33 @@
 import logging
 import sqlite3
 import os
+import sys # For sys.exit
 import uuid
+from typing import Optional, cast
 from dotenv import load_dotenv
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Message, User
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext, CallbackQueryHandler
+from telegram.constants import ParseMode
 
 # Load environment variables
 load_dotenv()
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID")) # Ensure this is an integer
+ADMIN_USER_ID_STR = os.getenv("ADMIN_USER_ID")
 DB_NAME = "nexus_files.db"
+
+# Initialize ADMIN_USER_ID, ensuring it's an int
+ADMIN_USER_ID: Optional[int] = None
+if ADMIN_USER_ID_STR:
+    try:
+        ADMIN_USER_ID = int(ADMIN_USER_ID_STR)
+    except ValueError:
+        logging.error("ADMIN_USER_ID in .env is not a valid integer.")
+        sys.exit(1) # Exit if ADMIN_USER_ID is invalid
+else:
+    logging.error("ADMIN_USER_ID not found in .env file.")
+    sys.exit(1) # Exit if ADMIN_USER_ID is not set
+
 
 # Enable logging
 logging.basicConfig(
@@ -19,12 +35,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def db_connect():
+def db_connect() -> sqlite3.Connection:
     """Create a database connection."""
     conn = sqlite3.connect(DB_NAME)
     return conn
 
-def create_table():
+def create_table() -> None:
     """Create the hosted_files table if it doesn't exist."""
     conn = db_connect()
     cursor = conn.cursor()
@@ -43,7 +59,9 @@ def create_table():
 
 async def start_command(update: Update, context: CallbackContext) -> None:
     """Handles the /start command and deep linking."""
+    assert update.message is not None, "update.message should not be None for CommandHandler"
     user = update.effective_user
+    assert user is not None, "update.effective_user should not be None for CommandHandler"
     args = context.args
 
     if not args:
@@ -53,7 +71,6 @@ async def start_command(update: Update, context: CallbackContext) -> None:
         )
         return
 
-    # Deep linking: /start unique_token
     token = args[0]
     conn = db_connect()
     cursor = conn.cursor()
@@ -63,36 +80,34 @@ async def start_command(update: Update, context: CallbackContext) -> None:
 
     if result:
         file_id, original_filename = result
+        # It's better to store file_type in DB, but for now, we keep the fallback
         try:
-            # For documents/general files
             await context.bot.send_document(chat_id=user.id, document=file_id, filename=original_filename)
         except Exception as e_doc:
-            logger.error(f"Error sending document by file_id {file_id} for token {token}: {e_doc}")
+            logger.info(f"Attempting to send as document failed for token {token} ({e_doc}), trying photo.")
             try:
-                # Fallback for photos
                 await context.bot.send_photo(chat_id=user.id, photo=file_id, caption=original_filename)
             except Exception as e_photo:
-                logger.error(f"Error sending photo by file_id {file_id} for token {token}: {e_photo}")
+                logger.info(f"Attempting to send as photo failed for token {token} ({e_photo}), trying video.")
                 try:
-                    # Fallback for videos
                     await context.bot.send_video(chat_id=user.id, video=file_id, caption=original_filename)
                 except Exception as e_video:
-                    logger.error(f"Error sending video by file_id {file_id} for token {token}: {e_video}")
+                    logger.info(f"Attempting to send as video failed for token {token} ({e_video}), trying audio.")
                     try:
-                        # Fallback for audio
                         await context.bot.send_audio(chat_id=user.id, audio=file_id, caption=original_filename)
                     except Exception as e_audio:
-                        logger.error(f"Error sending audio by file_id {file_id} for token {token}: {e_audio}")
-                        await update.message.reply_text("Sorry, I couldn't send this file. It might be a type I can't handle directly or it's no longer available.")
+                        logger.error(f"All attempts to send file failed for token {token}: {e_audio}")
+                        await update.message.reply_text("Sorry, I couldn't send this file. It might be a type I can't handle or it's no longer available.")
     else:
         await update.message.reply_text("Invalid or expired file link.")
 
 
 async def help_command(update: Update, context: CallbackContext) -> None:
     """Displays help message."""
+    assert update.message is not None, "update.message should not be None for CommandHandler"
     await show_help_message(update.message.chat_id, context.bot)
 
-async def show_help_message(chat_id: int, bot, message_id: int = None):
+async def show_help_message(chat_id: int, bot, message_id: Optional[int] = None) -> None:
     """Sends or edits the help message."""
     text = (
         "**Nexus File Hosting Bot Help**\n\n"
@@ -112,42 +127,47 @@ async def show_help_message(chat_id: int, bot, message_id: int = None):
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     if message_id:
-        await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=text, parse_mode="Markdown", reply_markup=reply_markup)
+        await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=text, parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup)
     else:
-        await bot.send_message(chat_id=chat_id, text=text, parse_mode="Markdown", reply_markup=reply_markup)
+        await bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup)
 
 
 async def button_callback_handler(update: Update, context: CallbackContext) -> None:
     """Handles button presses from inline keyboards."""
     query = update.callback_query
-    await query.answer() # Acknowledge callback
+    assert query is not None, "update.callback_query should not be None for CallbackQueryHandler"
+    await query.answer()
+
+    # query.message can be MaybeInaccessibleMessage, ensure it's a Message object
+    assert isinstance(query.message, Message), "query.message is not a Message instance or is None"
 
     if query.data == "help_general":
         await show_help_message(query.message.chat_id, context.bot, query.message.message_id)
     elif query.data == "help_close":
-        await query.edit_message_reply_markup(reply_markup=None) # Remove keyboard
-        # Optionally, delete the help message or revert to a simpler start message
-        # await query.delete_message()
+        await query.edit_message_reply_markup(reply_markup=None)
 
 
 async def handle_file(update: Update, context: CallbackContext) -> None:
     """Handles forwarded files from the admin."""
+    assert update.message is not None, "update.message should not be None for MessageHandler"
     user = update.effective_user
+    assert user is not None, "update.effective_user should not be None for MessageHandler"
 
+    # This check must use the initialized ADMIN_USER_ID which is confirmed to be an int
     if user.id != ADMIN_USER_ID:
         await update.message.reply_text("Sorry, only the admin can upload files.")
         logger.warning(f"Unauthorized file upload attempt by user {user.id} ({user.username})")
         return
 
-    message = update.message
-    file_id = None
-    original_filename = None
+    message = update.message # Already asserted not None
+    file_id: Optional[str] = None
+    original_filename: Optional[str] = None
 
     if message.document:
         file_id = message.document.file_id
         original_filename = message.document.file_name
     elif message.photo:
-        file_id = message.photo[-1].file_id # Get the largest photo
+        file_id = message.photo[-1].file_id
         original_filename = f"photo_{message.photo[-1].file_unique_id}.jpg"
     elif message.video:
         file_id = message.video.file_id
@@ -156,14 +176,15 @@ async def handle_file(update: Update, context: CallbackContext) -> None:
         file_id = message.audio.file_id
         original_filename = message.audio.file_name if message.audio.file_name else f"audio_{message.audio.file_unique_id}.mp3"
     else:
-        await update.message.reply_text("Unsupported file type. I can handle documents, photos, videos, and audio.")
+        # This case should ideally not be reached if filters are correct
+        await update.message.reply_text("Unsupported file type received despite filters. Please report this.")
         return
 
-    if not file_id: # Should not happen if one of the above conditions met
+    if not file_id: # Should be redundant due to above logic but good as a safeguard
         await update.message.reply_text("Could not get file information. Please try again.")
         return
 
-    unique_token = str(uuid.uuid4().hex[:16]) # Shorter, still very unique token
+    unique_token = str(uuid.uuid4().hex[:16])
 
     conn = db_connect()
     cursor = conn.cursor()
@@ -177,9 +198,7 @@ async def handle_file(update: Update, context: CallbackContext) -> None:
         share_link = f"https://t.me/{bot_username}?start={unique_token}"
         await update.message.reply_text(f"File stored! Your shareable link is:\n{share_link}")
         logger.info(f"File {original_filename} (ID: {file_id}) stored by admin {user.id}. Token: {unique_token}")
-    except sqlite3.IntegrityError: # Should catch unique constraint violations
-        # This could happen if Telegram reuses file_id for identical files for the same bot
-        # Or, highly unlikely, a token collision.
+    except sqlite3.IntegrityError:
         cursor.execute("SELECT unique_token FROM hosted_files WHERE file_id = ?", (file_id,))
         existing_token_row = cursor.fetchone()
         if existing_token_row:
@@ -188,10 +207,8 @@ async def handle_file(update: Update, context: CallbackContext) -> None:
             share_link = f"https://t.me/{bot_username}?start={existing_token}"
             await update.message.reply_text(f"This file seems to be already stored. Link:\n{share_link}")
         else:
-            # This case means token collision, which is extremely rare with UUID hex.
-            # Or some other integrity error.
-            await update.message.reply_text("Error storing file. It might already exist or there was a database issue. Try renaming and re-uploading if it's a new file.")
-            logger.error(f"Integrity error storing file_id {file_id}. Existing token found: {existing_token_row}")
+            await update.message.reply_text("Error storing file due to a database integrity issue (possibly token collision). Please try again.")
+            logger.error(f"Integrity error storing file_id {file_id} but no existing token found for this file_id. Potential token collision for token {unique_token}.")
     except Exception as e:
         logger.error(f"Error saving file to DB: {e}")
         await update.message.reply_text("An error occurred while saving the file information.")
@@ -200,32 +217,24 @@ async def handle_file(update: Update, context: CallbackContext) -> None:
 
 def main() -> None:
     """Start the bot."""
-    # Create db table if it doesn't exist
     create_table()
 
     if not TELEGRAM_BOT_TOKEN:
         logger.error("TELEGRAM_BOT_TOKEN not found in .env file!")
-        return
-    if not ADMIN_USER_ID:
-        logger.error("ADMIN_USER_ID not found in .env file or is not a valid number!")
-        return
+        sys.exit(1) # Exit if token is not set
 
+    # ADMIN_USER_ID is already checked and validated at the start of the script
     logger.info(f"Admin User ID set to: {ADMIN_USER_ID}")
+
 
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
-    # Command handlers
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
-
-    # Message handler for files (documents, photos, videos, audio)
-    # Ensure it only triggers on private chats or DMs with the bot
     application.add_handler(MessageHandler(
         (filters.Document.ALL | filters.PHOTO | filters.VIDEO | filters.AUDIO) & filters.ChatType.PRIVATE,
         handle_file
     ))
-
-    # Callback query handler for buttons
     application.add_handler(CallbackQueryHandler(button_callback_handler))
 
     logger.info("Bot starting...")
