@@ -11,32 +11,29 @@ from starlette.middleware.sessions import SessionMiddleware
 import sys
 
 # Add project root to sys.path to allow importing db_utils
-# This assumes main.py is in admin_dashboard/ and db_utils.py is in the parent directory (project root)
-# This is a common way to handle imports in sub-packages.
+# This assumes app.py is in admin_dashboard/ and supabase_utils.py is in the parent directory (project root)
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import db_utils # type: ignore # TODO: Fix this type ignore later if Pylance complains in this structure
+import supabase_utils # Changed from db_utils
 
-
-# Load environment variables
+# Load environment variables. This is important for Supabase client in supabase_utils too.
 load_dotenv()
 
 # Configuration
 SECRET_KEY = os.getenv("FASTAPI_SECRET_KEY", "a_very_secret_key_for_fastapi_sessions_please_change")
 ADMIN_DASHBOARD_PASSCODE = os.getenv("ADMIN_DASHBOARD_PASSCODE")
 SESSION_COOKIE_NAME = "nexus_dashboard_session"
-BOT_USERNAME = os.getenv("TELEGRAM_BOT_USERNAME", "YOUR_BOT_USERNAME_PLACEHOLDER") # For generating full links
-
-# Removed lifespan context manager and related subprocess imports from here.
-# Kept FastAPI app initialization.
+BOT_USERNAME = os.getenv("TELEGRAM_BOT_USERNAME", "YOUR_BOT_USERNAME_PLACEHOLDER")
 
 # Initialize FastAPI app
-app = FastAPI() # Lifespan will be managed by the root main.py if needed, or not at all by this specific app instance.
+app = FastAPI()
 
 # Mount static files
-app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")), name="static")
+# Use os.path.abspath to ensure the path is correct, especially if main.py is run from a different CWD.
+_current_dir = os.path.dirname(os.path.abspath(__file__))
+app.mount("/static", StaticFiles(directory=os.path.join(_current_dir, "static")), name="static")
 
 # Templates
-templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "templates"))
+templates = Jinja2Templates(directory=os.path.join(_current_dir, "templates"))
 
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -49,7 +46,9 @@ app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY, session_cookie=SESS
 
 # Basic Logger
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+# Configure logging only if handlers are not already set (e.g., by Uvicorn or root main.py)
+if not logger.hasHandlers():
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
 
 # --- Authentication ---
@@ -122,10 +121,11 @@ async def root_redirect(user: bool = Depends(get_current_user)):
 @app.get("/dashboard", response_class=HTMLResponse, name="dashboard_page")
 async def get_dashboard_page(request: Request, search: str = "", user: bool = Depends(get_current_user)):
     if not user:
-        return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
+        # Use app.url_path_for for consistency and if routes change
+        return RedirectResponse(url=app.url_path_for("login_page"), status_code=status.HTTP_302_FOUND)
 
-    files = db_utils.get_all_files(search_term=search if search else None)
-    files_for_template = [dict(file) for file in files]
+    # Supabase already returns a list of dicts, so no need for [dict(file) for file in files]
+    files_for_template = supabase_utils.get_all_files(search_term=search if search else None)
 
     return templates.TemplateResponse("dashboard.html", {
         "request": request,
@@ -140,13 +140,9 @@ async def delete_file_route(request: Request, db_id: int, user: bool = Depends(g
     if not user:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authenticated")
 
-    success = db_utils.delete_file_by_id(db_id)
+    success = supabase_utils.delete_file_by_id(db_id) # Use supabase_utils
     if not success:
-        logger.error(f"Failed to delete file with DB ID: {db_id}")
-    # Preserve search term on redirect if possible, or just redirect to base dashboard
-    # For simplicity, redirecting to base dashboard.
+        logger.error(f"Failed to delete file with DB ID: {db_id} from Supabase.")
     return RedirectResponse(url=app.url_path_for("dashboard_page"), status_code=status.HTTP_302_FOUND)
 
-# The following block is removed as per the plan:
-# if __name__ == "__main__":
-#    ... (uvicorn.run and bot startup logic) ...
+# No if __name__ == "__main__": block needed here anymore.

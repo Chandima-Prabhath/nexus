@@ -5,10 +5,16 @@ import signal
 import logging
 import uvicorn
 from typing import Optional
+from dotenv import load_dotenv # Import dotenv
+
+# --- Load .env variables at the very start ---
+load_dotenv()
 
 # --- Logger setup ---
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+# Configure logging only if handlers are not already set (e.g. by Uvicorn)
+if not logger.hasHandlers():
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
 # --- Global for bot process ---
 bot_process: Optional[subprocess.Popen] = None
@@ -85,34 +91,36 @@ if __name__ == "__main__":
 
     # Start Uvicorn for the FastAPI app
     # Import the app object from admin_dashboard.app
+    # Also ensure supabase_utils (and thus Supabase client) is initialized before bot/app try to use it.
     try:
+        # Ensure supabase_utils (which loads Supabase client) is imported and initialized first
+        import supabase_utils
+        if not supabase_utils.supabase:
+            logger.critical("Supabase client in supabase_utils failed to initialize. Cannot proceed.")
+            sys.exit(1)
+        else:
+            logger.info("Supabase client appears initialized via supabase_utils.")
+
         from admin_dashboard.app import app as fastapi_app
         logger.info("FastAPI app imported successfully.")
 
-        # Note: Uvicorn's --reload feature is best handled by running uvicorn directly from CLI.
-        # When running programmatically like this, --reload can behave unexpectedly with multiprocessing/subprocess.
-        # We are using reload=False here for more predictable behavior of this main script.
-        # For development with reload, it's often better to run uvicorn and the bot as separate commands.
         uvicorn_config = uvicorn.Config(
             app=fastapi_app,
             host="0.0.0.0",
             port=8000,
-            log_level="info",
-            # reload=True, # Enabling reload here can make managing the bot subprocess harder.
-            # app_dir="admin_dashboard" # This is not needed if 'app' is an app instance.
-                                    # app_dir is for when app is a string like "app:app"
+            log_level="info"
+            # reload=False is generally better for programmatic run to avoid issues with subprocesses.
+            # For development with reload, `uvicorn admin_dashboard.app:app --reload` is preferred for the web part.
         )
         server = uvicorn.Server(config=uvicorn_config)
         logger.info("Starting Uvicorn server for FastAPI dashboard...")
-        server.run() # This is a blocking call
+        server.run()
 
-    except ImportError:
-        logger.error("Could not import FastAPI app from admin_dashboard.app. Ensure paths are correct.")
+    except ImportError as e:
+        logger.error(f"Could not import required modules. Ensure paths and dependencies are correct: {e}")
     except Exception as e:
-        logger.error(f"An error occurred: {e}")
+        logger.error(f"An unexpected error occurred: {e}")
     finally:
-        # This finally block will be executed after uvicorn.server.run() completes (e.g. on Ctrl+C if not handled by signal)
-        # or if server.run() raises an exception.
         logger.info("Main script is exiting. Ensuring bot process is stopped.")
-        stop_bot_process()
+        stop_bot_process() # This will run when server.run() exits (e.g., Ctrl+C)
         logger.info("Exited.")

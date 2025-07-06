@@ -1,8 +1,9 @@
 python-telegram-bot
-python-dotenv
+# python-dotenv # Supabase client relies on env vars directly, can be loaded by application code if needed elsewhere.
 fastapi
 uvicorn[standard]
 jinja2
 python-multipart
-passlib[bcrypt]
-itsdangerous
+passlib[bcrypt] # For dashboard passcode hashing
+itsdangerous # For session cookies
+supabase

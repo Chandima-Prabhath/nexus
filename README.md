@@ -9,7 +9,7 @@ Nexus is a Telegram-based file hosting system with a FastAPI web dashboard for a
     *   Generates unique `t.me/YOUR_BOT?start=TOKEN` links for each file.
     *   Serves files when a valid link is accessed.
     *   Handles documents, photos, videos, and audio.
-    *   SQLite database for storing file metadata.
+    *   Uses Supabase (PostgreSQL) for storing file metadata.
 *   **FastAPI Admin Dashboard:**
     *   Passcode protected login (supports plain text or bcrypt hashed passcodes).
     *   View all hosted file records.
@@ -28,10 +28,10 @@ Nexus is a Telegram-based file hosting system with a FastAPI web dashboard for a
 │   │   ├── dashboard.html
 │   │   ├── login.html
 │   │   └── hash_passcode.html
-│   └── app.py              # FastAPI app logic (renamed from main.py)
+│   └── app.py              # FastAPI app logic
 ├── .env.example            # Example environment variables
 ├── .gitignore
-├── db_utils.py             # Shared database utilities
+├── supabase_utils.py       # Shared Supabase database utilities
 ├── LICENSE
 ├── main.py                 # Root script to run both bot and dashboard
 ├── nexus_bot.py            # Telegram bot logic
@@ -65,12 +65,25 @@ Nexus is a Telegram-based file hosting system with a FastAPI web dashboard for a
         ```
     *   Edit the `.env` file with your actual values:
         *   `TELEGRAM_BOT_TOKEN`: Your Telegram Bot token from BotFather.
-        *   `ADMIN_USER_ID`: Your numerical Telegram User ID. You can get this by sending `/myid` to a bot like `@userinfobot`.
-        *   `TELEGRAM_BOT_USERNAME`: Your Telegram Bot's username (without the `@` symbol, e.g., `MyNexusTestBot`). This is used by the dashboard to generate correct share links.
-        *   `ADMIN_DASHBOARD_PASSCODE`: Choose a strong passcode for your admin dashboard.
-            *   For initial setup, you can use a plain text passcode. The FastAPI app will log a warning and the bcrypt hash of this passcode when it starts.
-            *   For better security, replace the plain passcode with its bcrypt hashed version in the `.env` file. You can use the `/utility/hash_passcode` endpoint on the running dashboard for this.
-        *   `FASTAPI_SECRET_KEY`: A strong, random string used for signing session cookies. You can generate one using: `openssl rand -hex 32`.
+        *   `ADMIN_USER_ID`: Your numerical Telegram User ID.
+        *   `TELEGRAM_BOT_USERNAME`: Your Telegram Bot's username (without `@`).
+        *   `SUPABASE_URL`: Your Supabase project URL.
+        *   `SUPABASE_KEY`: Your Supabase project `anon` key (or `service_role` key if RLS is not configured for anon key to perform these operations - using `anon` key with proper RLS policies is recommended).
+        *   `ADMIN_DASHBOARD_PASSCODE`: Passcode for the admin dashboard.
+        *   `FASTAPI_SECRET_KEY`: Secret key for session cookies. Generate with `openssl rand -hex 32`.
+
+4.  **Supabase Database Setup:**
+    *   Go to your Supabase project dashboard.
+    *   Navigate to the "SQL Editor" or "Table Editor".
+    *   Create a new table named `hosted_files` with the following schema:
+        *   `id`: `bigint` (Primary Key, auto-incrementing, is_identity=true)
+        *   `file_id`: `text` (Set as UNIQUE)
+        *   `unique_token`: `text` (Set as UNIQUE)
+        *   `original_filename`: `text` (nullable)
+        *   `uploader_id`: `bigint`
+        *   `uploaded_at`: `timestamptz` (Default value: `now()`)
+    *   **Row Level Security (RLS):** For a production setup, ensure RLS is enabled for the `hosted_files` table.
+        *   If using the `anon` key from the backend, you might need to create policies that allow the `anon` role to perform select, insert, and delete operations as needed by the bot and dashboard. Alternatively, use the `service_role` key in your `.env` (this key bypasses RLS but should be kept very secure). For simplicity in this project, using the `service_role` key might be easier if you don't want to configure detailed RLS policies immediately. **However, for true security, RLS with the `anon` key is preferred.** The example `.env.example` refers to `SUPABASE_ANON_KEY_HERE` which implies an expectation of RLS or that the anon key has broad permissions for this table.
 
 ## Running the System
 
@@ -117,15 +130,17 @@ For more robust control or in production environments, you might prefer to run t
 
 ## Database
 
-*   The system uses an SQLite database file named `nexus_files.db` which will be created automatically in the project root directory when `db_utils.py` is first imported (e.g., when the bot or dashboard starts).
-*   This file stores metadata about the hosted files.
+*   The system now uses a [Supabase](https://supabase.com/) project (PostgreSQL) as its database.
+*   You must create the `hosted_files` table in your Supabase project as described in the Setup section.
+*   All file metadata is stored in this Supabase table.
 
 ## Important Security Notes
 
 *   **`ADMIN_DASHBOARD_PASSCODE`**: Always use a strong, unique passcode. For production, ensure it is the bcrypt hashed version stored in your `.env` file.
 *   **`FASTAPI_SECRET_KEY`**: This key is critical for session security. Ensure it is a long, random, and unique string. Do not commit your actual secret key to version control.
-*   **`.env` File**: Keep your `.env` file secure and **never** commit it to version control if it contains real secrets. The `.gitignore` is set up to prevent this.
-*   **Deployment**: For actual deployment, consider running Uvicorn behind a reverse proxy like Nginx or Traefik, and use HTTPS. The current setup is for development.
-*   **File Deletion**: Deleting a file record from the dashboard only removes it from the database and invalidates the share link. It **does not** delete the file from Telegram's servers.
-
-This `README.md` provides a good overview and setup instructions.
+*   **`.env` File**: Keep your `.env` file secure. It contains sensitive keys for Telegram, Supabase, and session management. **Never** commit it to public version control.
+*   **Supabase Keys**:
+    *   The `SUPABASE_KEY` in your `.env` file grants access to your database. If using the `service_role` key, it has full admin access and bypasses Row Level Security (RLS). Handle it with extreme care.
+    *   If using the `anon` key, ensure appropriate RLS policies are in place on your Supabase tables to restrict access.
+*   **Deployment**: For actual deployment, consider running Uvicorn behind a reverse proxy like Nginx or Traefik, and always use HTTPS.
+*   **File Deletion**: Deleting a file record from the dashboard only removes its metadata from the Supabase database, thereby invalidating the shareable link. It **does not** delete the actual file from Telegram's servers.
