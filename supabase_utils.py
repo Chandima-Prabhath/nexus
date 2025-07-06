@@ -17,7 +17,7 @@ SUPABASE_KEY: Optional[str] = os.getenv("SUPABASE_KEY")
 logger.info(f"Attempting to initialize Supabase client.")
 logger.info(f"Read SUPABASE_URL from .env: {SUPABASE_URL}")
 if SUPABASE_KEY and len(SUPABASE_KEY) > 4:
-    logger.info(f"Read SUPABASE_KEY from .env: ...{SUPABASE_KEY[-4:]} (masked)")
+    logger.info(f"Read SUPABASE_KEY from .env: ...{SUPABASE_KEY}")
 elif SUPABASE_KEY:
     logger.info(f"Read SUPABASE_KEY from .env: (key is too short to mask effectively)")
 else:
