@@ -1,20 +1,21 @@
 import logging
-import sqlite3
+import sqlite3 # Keep for type hinting if direct cursor use remains
 import os
-import sys # For sys.exit
+import sys
 import uuid
 from typing import Optional, cast
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Message, User
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext, CallbackQueryHandler
 from telegram.constants import ParseMode
+import db_utils # Import the new database utility module
 
 # Load environment variables
 load_dotenv()
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 ADMIN_USER_ID_STR = os.getenv("ADMIN_USER_ID")
-DB_NAME = "nexus_files.db"
+# DB_NAME is now managed in db_utils
 
 # Initialize ADMIN_USER_ID, ensuring it's an int
 ADMIN_USER_ID: Optional[int] = None
@@ -23,10 +24,10 @@ if ADMIN_USER_ID_STR:
         ADMIN_USER_ID = int(ADMIN_USER_ID_STR)
     except ValueError:
         logging.error("ADMIN_USER_ID in .env is not a valid integer.")
-        sys.exit(1) # Exit if ADMIN_USER_ID is invalid
+        sys.exit(1)
 else:
     logging.error("ADMIN_USER_ID not found in .env file.")
-    sys.exit(1) # Exit if ADMIN_USER_ID is not set
+    sys.exit(1)
 
 
 # Enable logging
@@ -35,27 +36,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def db_connect() -> sqlite3.Connection:
-    """Create a database connection."""
-    conn = sqlite3.connect(DB_NAME)
-    return conn
-
-def create_table() -> None:
-    """Create the hosted_files table if it doesn't exist."""
-    conn = db_connect()
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS hosted_files (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            file_id TEXT NOT NULL UNIQUE,
-            unique_token TEXT NOT NULL UNIQUE,
-            original_filename TEXT,
-            uploader_id INTEGER NOT NULL,
-            uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    conn.commit()
-    conn.close()
+# create_table function is now in db_utils and called on import.
 
 async def start_command(update: Update, context: CallbackContext) -> None:
     """Handles the /start command and deep linking."""
@@ -72,7 +53,7 @@ async def start_command(update: Update, context: CallbackContext) -> None:
         return
 
     token = args[0]
-    conn = db_connect()
+    conn = db_utils.db_connect()
     cursor = conn.cursor()
     cursor.execute("SELECT file_id, original_filename FROM hosted_files WHERE unique_token = ?", (token,))
     result = cursor.fetchone()
@@ -80,7 +61,6 @@ async def start_command(update: Update, context: CallbackContext) -> None:
 
     if result:
         file_id, original_filename = result
-        # It's better to store file_type in DB, but for now, we keep the fallback
         try:
             await context.bot.send_document(chat_id=user.id, document=file_id, filename=original_filename)
         except Exception as e_doc:
@@ -138,7 +118,6 @@ async def button_callback_handler(update: Update, context: CallbackContext) -> N
     assert query is not None, "update.callback_query should not be None for CallbackQueryHandler"
     await query.answer()
 
-    # query.message can be MaybeInaccessibleMessage, ensure it's a Message object
     assert isinstance(query.message, Message), "query.message is not a Message instance or is None"
 
     if query.data == "help_general":
@@ -153,13 +132,12 @@ async def handle_file(update: Update, context: CallbackContext) -> None:
     user = update.effective_user
     assert user is not None, "update.effective_user should not be None for MessageHandler"
 
-    # This check must use the initialized ADMIN_USER_ID which is confirmed to be an int
     if user.id != ADMIN_USER_ID:
         await update.message.reply_text("Sorry, only the admin can upload files.")
         logger.warning(f"Unauthorized file upload attempt by user {user.id} ({user.username})")
         return
 
-    message = update.message # Already asserted not None
+    message = update.message
     file_id: Optional[str] = None
     original_filename: Optional[str] = None
 
@@ -176,17 +154,16 @@ async def handle_file(update: Update, context: CallbackContext) -> None:
         file_id = message.audio.file_id
         original_filename = message.audio.file_name if message.audio.file_name else f"audio_{message.audio.file_unique_id}.mp3"
     else:
-        # This case should ideally not be reached if filters are correct
         await update.message.reply_text("Unsupported file type received despite filters. Please report this.")
         return
 
-    if not file_id: # Should be redundant due to above logic but good as a safeguard
+    if not file_id:
         await update.message.reply_text("Could not get file information. Please try again.")
         return
 
     unique_token = str(uuid.uuid4().hex[:16])
 
-    conn = db_connect()
+    conn = db_utils.db_connect()
     cursor = conn.cursor()
     try:
         cursor.execute(
@@ -198,7 +175,7 @@ async def handle_file(update: Update, context: CallbackContext) -> None:
         share_link = f"https://t.me/{bot_username}?start={unique_token}"
         await update.message.reply_text(f"File stored! Your shareable link is:\n{share_link}")
         logger.info(f"File {original_filename} (ID: {file_id}) stored by admin {user.id}. Token: {unique_token}")
-    except sqlite3.IntegrityError:
+    except sqlite3.IntegrityError: # Specific exception for IntegrityError
         cursor.execute("SELECT unique_token FROM hosted_files WHERE file_id = ?", (file_id,))
         existing_token_row = cursor.fetchone()
         if existing_token_row:
@@ -209,7 +186,7 @@ async def handle_file(update: Update, context: CallbackContext) -> None:
         else:
             await update.message.reply_text("Error storing file due to a database integrity issue (possibly token collision). Please try again.")
             logger.error(f"Integrity error storing file_id {file_id} but no existing token found for this file_id. Potential token collision for token {unique_token}.")
-    except Exception as e:
+    except Exception as e: # General exception
         logger.error(f"Error saving file to DB: {e}")
         await update.message.reply_text("An error occurred while saving the file information.")
     finally:
@@ -217,15 +194,13 @@ async def handle_file(update: Update, context: CallbackContext) -> None:
 
 def main() -> None:
     """Start the bot."""
-    create_table()
+    # db_utils.create_table_if_not_exists() is called when db_utils is imported.
 
     if not TELEGRAM_BOT_TOKEN:
         logger.error("TELEGRAM_BOT_TOKEN not found in .env file!")
-        sys.exit(1) # Exit if token is not set
+        sys.exit(1)
 
-    # ADMIN_USER_ID is already checked and validated at the start of the script
     logger.info(f"Admin User ID set to: {ADMIN_USER_ID}")
-
 
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 

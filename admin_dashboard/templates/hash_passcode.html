@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hash Passcode Utility</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>Hash Passcode Utility</h1>
+        <p>Use this utility to generate a bcrypt hash for your desired admin dashboard passcode.
+           Once generated, copy the "Hashed Value" and set it as the
+           <code>ADMIN_DASHBOARD_PASSCODE</code> in your <code>.env</code> file for improved security.</p>
+
+        <form method="post" action="{{ url_for('process_hash_passcode') }}">
+            <div>
+                <label for="plain_passcode">Enter Passcode to Hash:</label>
+                <input type="password" id="plain_passcode" name="plain_passcode" required>
+            </div>
+            <button type="submit">Hash Passcode</button>
+        </form>
+
+        {% if hashed_passcode %}
+        <div style="margin-top: 20px; padding: 10px; border: 1px solid #ccc; background-color: #f9f9f9;">
+            <h3>Passcode Hashed Successfully:</h3>
+            <p><strong>Original Passcode:</strong> {{ original_passcode }}</p>
+            <p><strong>Hashed Value:</strong><br>
+            <code style="word-break: break-all;">{{ hashed_passcode }}</code></p>
+            <p><strong>Action:</strong> Copy the hashed value above and paste it into your <code>.env</code> file for the <code>ADMIN_DASHBOARD_PASSCODE</code> variable.</p>
+        </div>
+        {% endif %}
+
+        <p style="margin-top: 30px;"><a href="{{ url_for('login_page') }}">Back to Login</a></p>
+        <p><small>Note: This utility is for setup purposes. Ensure your .env file is secured.</small></p>
+    </div>
+</body>
+</html>

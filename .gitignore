@@ -1,5 +1,26 @@
+# Environment variables
 .env
+*.env.*
+!*.env.example
+
+# Python cache
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+
+# Database files
 *.db
+*.sqlite
 *.sqlite3
+
+# FastAPI / Uvicorn
+# No specific files usually, but .coverage for tests might appear here
+.coverage
+.coverage.*
+# .pytest_cache/ (if using pytest)
+
+# IDE / Editor specific
+.vscode/
+.idea/
+*.swp
+*~
