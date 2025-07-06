@@ -28,11 +28,12 @@ Nexus is a Telegram-based file hosting system with a FastAPI web dashboard for a
 │   │   ├── dashboard.html
 │   │   ├── login.html
 │   │   └── hash_passcode.html
-│   └── main.py             # FastAPI app logic
+│   └── app.py              # FastAPI app logic (renamed from main.py)
 ├── .env.example            # Example environment variables
 ├── .gitignore
 ├── db_utils.py             # Shared database utilities
 ├── LICENSE
+├── main.py                 # Root script to run both bot and dashboard
 ├── nexus_bot.py            # Telegram bot logic
 ├── README.md               # This file
 └── requirements.txt        # Python dependencies
@@ -73,41 +74,36 @@ Nexus is a Telegram-based file hosting system with a FastAPI web dashboard for a
 
 ## Running the System
 
-You need to run two separate applications: the Telegram Bot and the FastAPI Web Dashboard.
+The recommended way to run the system for development is using the root `main.py` script, which starts both the Telegram bot and the FastAPI web dashboard.
 
-**1. Running the Telegram Bot:**
+**1. Running Both Services (Recommended for Development):**
 
-*   Ensure your `.env` file is correctly configured, especially `TELEGRAM_BOT_TOKEN` and `ADMIN_USER_ID`.
-*   Run the bot:
+*   Ensure your `.env` file is correctly configured with all required variables.
+*   From the project's root directory, run:
     ```bash
-    python nexus_bot.py
+    python main.py
     ```
-*   The bot will start polling for updates. To use it:
+*   This command will:
+    *   Start the Telegram bot (`nexus_bot.py`) as a background process.
+    *   Start the FastAPI web dashboard using Uvicorn (typically on `http://localhost:8000`).
+*   To stop both services, press `Ctrl+C` in the terminal where `main.py` is running. This should gracefully shut down both the Uvicorn server and the bot process.
+
+*   **Bot Usage:**
     *   Create a private Telegram channel.
     *   Upload files to this channel.
     *   Forward the messages containing the files from the channel to your bot (in a private chat with the bot).
     *   The bot will reply with a unique shareable link.
 
-**2. Running the FastAPI Admin Dashboard:**
-
-*   Ensure your `.env` file is correctly configured, especially `ADMIN_DASHBOARD_PASSCODE` and `FASTAPI_SECRET_KEY`.
-*   Navigate to the `admin_dashboard` directory if you want to run uvicorn from there, or run from project root specifying the app path.
-*   Run the FastAPI app using Uvicorn (from the project root):
-    ```bash
-    python admin_dashboard/main.py
-    ```
-    This will start the Uvicorn server for the dashboard (typically on `http://localhost:8000`) and will also attempt to start the `nexus_bot.py` in a background process.
-
-    *   **Note on `--reload` with Integrated Bot:** If you run Uvicorn directly with `--reload` (e.g., `uvicorn admin_dashboard.main:app --reload`), the bot process management might behave unexpectedly due to how Uvicorn handles reloading. Running `python admin_dashboard/main.py` is the recommended way for the integrated startup during development. For production, consider running the bot and web app as separate services.
-
-*   Access the dashboard in your browser, typically at `http://localhost:8000`. You will be redirected to `/login`.
-*   **Hashing Passcode (First Time/Security Upgrade):**
-    *   If you set a plain text `ADMIN_DASHBOARD_PASSCODE` in `.env`, the FastAPI application startup log (when running `python admin_dashboard/main.py`) will show you its bcrypt hash. Copy this hash and update `ADMIN_DASHBOARD_PASSCODE` in your `.env` file for better security.
-    *   Alternatively, once the dashboard is running, you can navigate to `http://localhost:8000/utility/hash_passcode`, enter your desired passcode, and it will display the hashed version for you to copy into your `.env` file.
+*   **Dashboard Usage:**
+    *   Access the dashboard in your browser, typically at `http://localhost:8000`. You will be redirected to `/login`.
+    *   Log in using the `ADMIN_DASHBOARD_PASSCODE` from your `.env` file.
+    *   **Hashing Passcode (First Time/Security Upgrade):**
+        *   If you set a plain text `ADMIN_DASHBOARD_PASSCODE` in `.env`, the application startup log (when running `python main.py`) will show you its bcrypt hash. Copy this hash and update `ADMIN_DASHBOARD_PASSCODE` in your `.env` file for better security.
+        *   Alternatively, once the dashboard is running, you can navigate to `http://localhost:8000/utility/hash_passcode`, enter your desired passcode, and it will display the hashed version for you to copy into your `.env` file.
 
 **2. Running Bot and Dashboard Separately (Alternative/Production):**
 
-For more robust control, especially in production, you might prefer to run them as separate processes:
+For more robust control or in production environments, you might prefer to run the bot and the web dashboard as separate processes (e.g., using systemd, Docker Compose, or separate terminal sessions):
 
 *   **Terminal 1 (Bot):**
     ```bash
@@ -115,12 +111,13 @@ For more robust control, especially in production, you might prefer to run them 
     ```
 *   **Terminal 2 (Dashboard):**
     ```bash
-    uvicorn admin_dashboard.main:app --host 0.0.0.0 --port 8000
+    uvicorn admin_dashboard.app:app --host 0.0.0.0 --port 8000
     ```
+    *(Note: `admin_dashboard.app:app` refers to the `app` instance in `admin_dashboard/app.py`)*
 
 ## Database
 
-*   The system uses an SQLite database file named `nexus_files.db` which will be created automatically in the project root directory when either the bot or the dashboard first initializes database utilities.
+*   The system uses an SQLite database file named `nexus_files.db` which will be created automatically in the project root directory when `db_utils.py` is first imported (e.g., when the bot or dashboard starts).
 *   This file stores metadata about the hosted files.
 
 ## Important Security Notes

@@ -10,18 +10,18 @@
     <header>
         <h1>{{ bot_name }} Admin Dashboard</h1>
         <nav>
-            <a href="{{ url_for('get_dashboard_page') }}">Dashboard</a>
+            <a href="{{ url_for('dashboard_page') }}">Dashboard</a>
             <a href="{{ url_for('logout') }}">Logout</a>
         </nav>
     </header>
     <div class="container">
         <h2>Hosted Files</h2>
 
-        <form method="get" action="{{ url_for('get_dashboard_page') }}" class="search-form">
+        <form method="get" action="{{ url_for('dashboard_page') }}" class="search-form">
             <input type="text" name="search" placeholder="Search by filename..." value="{{ search_term if search_term else '' }}">
             <button type="submit">Search</button>
             {% if search_term %}
-                <a href="{{ url_for('get_dashboard_page') }}" class="clear-search-button">Clear Search</a>
+                <a href="{{ url_for('dashboard_page') }}" class="clear-search-button">Clear Search</a>
             {% endif %}
         </form>
 
