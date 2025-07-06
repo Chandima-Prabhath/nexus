@@ -14,18 +14,25 @@ logger = logging.getLogger(__name__)
 SUPABASE_URL: Optional[str] = os.getenv("SUPABASE_URL")
 SUPABASE_KEY: Optional[str] = os.getenv("SUPABASE_KEY")
 
+logger.info(f"Attempting to initialize Supabase client.")
+logger.info(f"Read SUPABASE_URL from .env: {SUPABASE_URL}")
+if SUPABASE_KEY and len(SUPABASE_KEY) > 4:
+    logger.info(f"Read SUPABASE_KEY from .env: ...{SUPABASE_KEY[-4:]} (masked)")
+elif SUPABASE_KEY:
+    logger.info(f"Read SUPABASE_KEY from .env: (key is too short to mask effectively)")
+else:
+    logger.info("SUPABASE_KEY not found or is empty in .env.")
+
 if not SUPABASE_URL or not SUPABASE_KEY:
-    logger.error("SUPABASE_URL and SUPABASE_KEY must be set in environment variables.")
-    # You might want to raise an exception or handle this more gracefully
-    # depending on how the application should behave if Supabase is not configured.
+    logger.error("SUPABASE_URL and/or SUPABASE_KEY are missing. Cannot initialize Supabase client.")
     supabase: Optional[Client] = None
 else:
     try:
-        supabase: Optional[Client] = create_client(SUPABASE_URL, SUPABASE_KEY)
+        supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY) # Type as Client, not Optional[Client] here
         logger.info("Supabase client initialized successfully.")
     except Exception as e:
         logger.error(f"Failed to initialize Supabase client: {e}")
-        supabase = None
+        supabase = None # type: ignore # Explicitly set to None on failure for later checks
 
 TABLE_NAME = "hosted_files"
 
