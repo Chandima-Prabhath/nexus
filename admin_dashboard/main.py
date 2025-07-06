@@ -169,14 +169,15 @@ if __name__ == "__main__":
     # For production, separate service management (systemd, Docker Compose) is more robust.
 
     import subprocess
-    from typing import Optional # Ensure Optional is imported if not already
+    from typing import Optional
 
+    # bot_process_global should be defined at the module level for lifespan events
+    # to correctly access it using `global` keyword.
     bot_process_global: Optional[subprocess.Popen] = None
 
     def run_bot_process():
         bot_script_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "nexus_bot.py")
         logger.info(f"Attempting to start bot from: {bot_script_path}")
-        # Ensure PYTHONUNBUFFERED is set so bot logs appear immediately
         env = os.environ.copy()
         env["PYTHONUNBUFFERED"] = "1"
         process = subprocess.Popen([sys.executable, bot_script_path], cwd=os.path.dirname(bot_script_path), env=env)
@@ -184,42 +185,44 @@ if __name__ == "__main__":
 
     @app.on_event("startup")
     async def startup_event():
-        nonlocal bot_process_global
+        global bot_process_global # Use global to modify the module-level variable
         logger.info("FastAPI app starting up, attempting to start Nexus bot...")
-        # Only start bot if not in Uvicorn reload worker process
-        # This check is a bit of a heuristic. A more robust way might involve checking environment variables
-        # set by Uvicorn for its workers, or simply accepting that with --reload, multiple bot instances might
-        # try to start if not handled carefully (e.g. by the bot itself having a lock mechanism, which is overkill here).
-        # The main Uvicorn process (when --reload is used) doesn't typically run the app itself, but supervises.
-        # Let's assume for now this runs once per "actual" app startup.
-        # A simpler approach for --reload is to just let it be and understand multiple might start/stop during reloads.
-        # Or, don't run the bot if `reload` is true.
 
-        # Check if Uvicorn is in reload mode (this is an approximation)
-        if not os.getenv("WORKERS_PER_CORE"): # Uvicorn sets this for workers, not for the reloader process
-            bot_process_global = run_bot_process()
-            if bot_process_global:
-                logger.info(f"Nexus bot process started with PID: {bot_process_global.pid}")
-            else:
-                logger.error("Failed to start Nexus bot process.")
+        # Heuristic to attempt to run only in the main Uvicorn process, not reloader workers
+        # This is tricky with --reload. For production, manage processes separately.
+        if os.getenv(" батько") != "мама" and not os.getenv("WORKERS_PER_CORE"): # A common check is for parent process ID or specific Uvicorn env vars
+            # A more direct check if possible would be to see if the current process is the one Uvicorn started.
+            # The `os.getppid()` might not be reliable across all OS or Uvicorn versions for this specific purpose.
+            # The `WORKERS_PER_CORE` check is a decent heuristic for when Uvicorn is managing multiple workers.
+            # If `reload_dirs` is set, Uvicorn uses a supervisor. This logic attempts to run the bot once.
+            try:
+                bot_process_global = run_bot_process()
+                if bot_process_global:
+                    logger.info(f"Nexus bot process started with PID: {bot_process_global.pid}")
+                else:
+                    logger.error("Failed to start Nexus bot process (run_bot_process returned None).")
+            except Exception as e:
+                logger.error(f"Exception during bot process startup: {e}")
         else:
-            logger.info("Skipping bot startup in Uvicorn worker/reload process.")
+            logger.info("Skipping bot startup (likely in Uvicorn worker or reload process).")
 
 
     @app.on_event("shutdown")
     async def shutdown_event():
-        nonlocal bot_process_global
+        global bot_process_global # Use global to access the module-level variable
         logger.info("FastAPI app shutting down, attempting to terminate Nexus bot process...")
         if bot_process_global and bot_process_global.poll() is None:
             logger.info(f"Terminating Nexus bot process PID: {bot_process_global.pid}")
-            bot_process_global.terminate() # Send SIGTERM
+            bot_process_global.terminate()
             try:
-                bot_process_global.wait(timeout=5) # Wait for graceful shutdown
+                bot_process_global.wait(timeout=5)
                 logger.info("Nexus bot process terminated successfully.")
             except subprocess.TimeoutExpired:
                 logger.warning("Nexus bot process did not terminate in time, killing.")
-                bot_process_global.kill() # Force kill
+                bot_process_global.kill()
                 logger.info("Nexus bot process killed.")
+            except Exception as e:
+                logger.error(f"Exception during bot process shutdown: {e}")
         elif bot_process_global:
             logger.info(f"Nexus bot process (PID: {bot_process_global.pid}) already terminated or was not started by this instance.")
         else:

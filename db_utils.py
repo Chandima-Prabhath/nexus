@@ -41,7 +41,9 @@ def create_table_if_not_exists() -> None:
         if conn:
             conn.close()
 
-def get_all_files(search_term: str = None) -> list[sqlite3.Row]:
+from typing import Optional # Add this import
+
+def get_all_files(search_term: Optional[str] = None) -> list[sqlite3.Row]:
     """Fetches all files, optionally filtered by a search term on original_filename."""
     files = []
     conn = None
